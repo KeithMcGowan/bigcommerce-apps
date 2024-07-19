@@ -1,0 +1,37 @@
+.ReactModal__Content {
+    max-width: 600px;
+    height: fit-content;
+    padding: 40px 20px !important;
+    margin: auto;
+}
+
+.button {
+    margin-top: 20px;
+    padding: 10px 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.buttonPrimary {
+    background-color: #FFFFFF;
+    color: #282c34;
+
+    &:hover {
+        background-color: #282c34;
+        color: #FFFFFF;
+        border-color: #FFFFFF;
+    }
+}
+
+.buttonSecondary {
+    background-color: #282c34;
+    color: #FFFFFF;
+    border-color: #FFFFFF;
+
+    &:hover {
+        background-color: #FFFFFF;
+        color: #282c34;
+    }
+}

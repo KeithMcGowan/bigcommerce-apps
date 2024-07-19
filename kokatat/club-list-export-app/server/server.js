@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
@@ -5,34 +7,30 @@ const path = require('path');
 const csv = require('csv-parser');
 const multer = require('multer');
 const { Server } = require('ws');
-const { type } = require('os');
+const { Readable } = require('stream');
 
 const app = express();
-const port = 5000;
-const storeHash = '2y1g1tdlub';
-const authToken = 'jr9wifrgu40h0kpz0xw03s3bgo8efrt';
-const uploadFolder = path.join(__dirname, 'bc-exports');
-const expiredCustomersFolder = path.join(__dirname, 'expired-customers');
+const port = process.env.PORT || 5000;
+// const storeHash = '2y1g1tdlub';
+const storeHash = process.env.STORE_HASH;
+// const authToken = 'jr9wifrgu40h0kpz0xw03s3bgo8efrt';
+const authToken = process.env.AUTH_TOKEN;
 
-app.use(cors());
+// Middleware
+app.use(cors({
+    origin: 'http://localhost:3000',
+    credentials: true,
+    exposedHeaders: ['Content-Disposition'] // Ensure header is exposed
+}));
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, '..', 'client', 'build')));
 
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadFolder);
-    },
-    filename: function (req, file, cb) {
-        cb(null, file.originalname);
-    }
-});
+// Multer setup for file upload
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// If the uploadFolder or expiredCustomersFolder don't exist, create them for new files
-if (!fs.existsSync(uploadFolder)) fs.mkdir(uploadFolder);
-if (!fs.existsSync(expiredCustomersFolder)) fs.mkdir(expiredCustomersFolder);
-
 let fetch;
+
 (async () => {
     const module = await import('node-fetch');
     fetch = module.default;
@@ -89,10 +87,9 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
     if (!file) return res.status(400).send('No file uploaded.');
 
-    const filePath = file.path;
     const customers = [];
 
-    fs.createReadStream(filePath)
+    Readable.from(file.buffer.toString())
         .pipe(csv({
             mapHeaders: ({ header }) => header.trim(), // Trim headers to remove any leading/trailing spaces
             quote: '"' // Specify quote character for CSV parser (default is double quote)
@@ -103,7 +100,6 @@ app.post('/upload', upload.single('file'), (req, res) => {
         .on('end', async () => {
             console.log('CSV file read complete. Processing data...');
 
-            // Filter the customers based on the specified customer groups
             const filteredGroups = ["gold service club", "gold service club - h2o", "platinum service club", "platinum service club - h2o"];
             const filteredCustomers = customers.filter(customer => filteredGroups.includes(customer['Customer Group'].toLowerCase()));
 
@@ -119,20 +115,20 @@ app.post('/upload', upload.single('file'), (req, res) => {
                 // Check if there are more than 5 fields (handle quoted fields with commas)
                 if (Object.keys(customer).length > 5) {
                     // Combine extra fields into the correct field (e.g., Customer Name)
-                    const extraFields = Object.keys(customer).slice(5); // Get all extra fields
+                    const extraFields = Object.keys(customer).slice(5);
                     const combinedCustomerName = extraFields.map(key => customer[key]).join(',');
+
                     customer['Customer Name'] = combinedCustomerName;
                     
                     // Remove the extra fields
                     extraFields.forEach(field => delete customer[field]);
                 }
 
-                // Get customer's expiration date from BC Attribute Values API
                 const expirationDate = await getExpirationDate(customer['Customer ID']);
 
                 // Remove Date Joined and add Expiration Date
                 delete customer['Date Joined'];
-                customer['Expiration Date'] = expirationDate || 'N/A'; // Use 'N/A' if no expiration date exists
+                customer['Expiration Date'] = expirationDate || 'N/A';
 
                 transformedCustomers.push(customer);
                 processedCustomers++;
@@ -154,49 +150,38 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
             // Prepare CSV header
             const csvHeader = Object.keys(transformedCustomers[0]).join(',') + '\n';
-        
+
             // Prepare CSV rows
             const csvRows = transformedCustomers.map(customer => Object.values(customer).map(value => {
-                // Enclose values in double quotes if they contain commas
                 if (value.includes(',')) {
                     return `"${value}"`;
                 }
-
                 return value;
             }).join(',') + '\n');
 
             // Write to CSV file with timestamped file name
-            const csvFileName = `expired-customers-${timestamp}.csv`;
-            // const csvFilePathOutput = `${expiredCustomersFolder}/${csvFileName}`;
-            const csvFilePathOutput = path.join(expiredCustomersFolder, csvFileName);
-            
-            fs.writeFile(csvFilePathOutput, csvHeader + csvRows.join(''), { encoding: 'utf8' }, (err) => {
-                if (err) return res.status(500).send('Error writing CSV file.');
+            const csvContent = csvHeader + csvRows.join('');
+            const fileName = `expired-customers-${timestamp}.csv`;
 
-                // Delete orignal CSV if expired customers CSV is created
-                fs.unlink(filePath, err => {
-                    if (err) return res.status(500).send('Error deleting original CSV file.');
+            res.setHeader('Content-disposition', `attachment; filename="${fileName}"`);
+            res.setHeader('Content-Type', 'text/csv');
 
-                    res.json({ 
-                        message: `CSV file with expired customers created: ${csvFileName}`,
-                        downloadUrl: `http://localhost:5000/download/${csvFileName}`
-                    });
-                });
-            });
+            // Log headers to verify
+            console.log('Response Headers:', res.getHeaders());
+
+            res.status(200).send(csvContent);
         });
 });
 
-app.get('/download/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filePath = path.join(expiredCustomersFolder, filename);
-
-    res.download(filePath);
+app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, '..', 'client', 'build', 'index.html'));
 })
 
 const server = app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
 
+// Allow front end to listen to server to send progress updates
 server.on('upgrade', (request, socket, head) => {
     wss.handleUpgrade(request, socket, head, ws => {
         wss.emit('connection', ws, request);
