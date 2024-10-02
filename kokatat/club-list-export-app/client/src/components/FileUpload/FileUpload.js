@@ -11,6 +11,7 @@ const FileUpload = ({ onLogout }) => {
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [modalIsOpen, setModalIsOpen] = useState(false);
+    const [csvFileName, setCsvFileName] = useState('');
     const [downloadUrl, setDownloadUrl] = useState('');
     const [dragOver, setDragOver] = useState(false);
 
@@ -63,8 +64,12 @@ const FileUpload = ({ onLogout }) => {
             const contentDisposition = res.headers['content-disposition'];
 
             if (contentDisposition) {
-                const filenameMatch = contentDisposition ? contentDisposition.match(/filename="(.+)"/) : null;
+                // const filenameMatch = contentDisposition ? contentDisposition.match(/filename="(.+)"/) : null;
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
                 const csvFileName = filenameMatch ? filenameMatch[1] : 'downloaded-file.csv';
+
+                setCsvFileName(csvFileName);
+                
                 const downloadUrl = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
 
                 setMessage(`${csvFileName} successfully created!`);
@@ -149,7 +154,7 @@ const FileUpload = ({ onLogout }) => {
                 <div className={styles.modalContent}>
                     <h2>Download CSV</h2>
                     <p>Click the link below to download your CSV file:</p>
-                    <a href={downloadUrl} download>Download CSV</a>
+                    <a href={downloadUrl} download={csvFileName}>Download CSV</a>
                     <button onClick={closeModal} title='Close Modal'>&#10006;</button>
                 </div>
             </Modal>
